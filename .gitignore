@@ -1,0 +1,56 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# Build artifacts
+*.o
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.out
+
+# Exception: Track .exe files for distribution
+!*.exe
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Qt auto-generated files
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+*.moc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules/
+vcpkg_installed/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
