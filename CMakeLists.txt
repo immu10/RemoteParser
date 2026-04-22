@@ -9,16 +9,29 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 
 qt_add_executable(fileParser
     src/main.cpp
     src/mainwindow.cpp
     include/mainwindow.h 
     ui/mainwindow.ui
+    src/server.cpp
+    include/server.h
+    src/client.cpp
+    include/client.h
+    src/launchwindow.cpp
+    include/launchwindow.h
+    src/serverwindow.cpp
+    include/serverwindow.h
+
 )
 
 target_link_libraries(fileParser PRIVATE Qt6::Widgets)
+target_link_libraries(fileParser PRIVATE Qt6::Widgets Qt6::Network)
+
 target_include_directories(fileParser PRIVATE include src)
+
 
 set_target_properties(fileParser PROPERTIES
     AUTOUIC_SEARCH_PATHS "${CMAKE_SOURCE_DIR}/ui"
