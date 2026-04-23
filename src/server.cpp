@@ -55,6 +55,7 @@ void Server::startListening(int port) {
     } else {
         qDebug() << "Failed to start server";
     }
+
 }
 
 
@@ -88,22 +89,8 @@ void Server::onNewConnection() {
         QString message = QString::fromUtf8(data);
         qDebug() << "Received:" << message;
         emit activityLogged("Received request: " + message); 
+        handleRequest(socket, message);
 
-
-        if (message.startsWith("LIST:")) {
-            QString path = message.mid(5); // everything after "LIST:"
-            QString response = listDirectory(path);
-            socket->write(response.toUtf8());
-            emit activityLogged("Sent: " + path);
-        }
-        if (message.startsWith("DELETE:")) {
-            QString path = message.mid(7);
-            QDir dir;
-            bool success = dir.remove(path);  // for files
-            if (!success) success = dir.rmdir(path);  // for empty dirs
-            socket->write(success ? "OK:Deleted" : "ERROR:Delete failed");
-        }
-        
     });
 }
 
@@ -126,4 +113,46 @@ QString Server::listDirectory(const QString &path) {
     }
 
     return response;
+}
+
+void Server::handleRequest(QSslSocket *socket, const QString &message) {
+
+    if (message.startsWith("LIST:")) {
+            QString path = message.mid(5); 
+            qDebug() << "Listing path:" << path;
+            QString response = listDirectory(path);
+            socket->write(response.toUtf8());
+            emit activityLogged("Sent: " + path);
+        }
+    else if (message.startsWith("DELETE:")) {
+        QString path = message.mid(7);
+        QDir dir;
+        bool success = dir.remove(path);  // for files
+        if (!success) success = dir.rmdir(path);  // for empty dirs
+        socket->write(success ? "OK:Deleted" : "ERROR:Delete failed");
+        }
+    
+    else if (message.startsWith("RENAME:")) {
+        QString paths = message.mid(7);
+        QStringList parts = paths.split("|");
+        QString oldPath = parts[0];
+        QString newPath = parts[1];
+        bool success = QFile::rename(oldPath, newPath);
+        socket->write(success ? "OK:Renamed" : "ERROR:Rename failed");
+    }
+    else if (message.startsWith("MKDIR:")) {
+        QString path = message.mid(6);
+        QDir dir;
+        bool success = dir.mkdir(path);
+        socket->write(success ? "OK:Folder created" : "ERROR:Failed to create folder");
+        emit activityLogged("mkdir: " + path);
+    }
+    else if (message == "DRIVES") {
+        QFileInfoList drives = QDir::drives();
+        QString response;
+        for (const QFileInfo &drive : drives) {
+            response += "DIR:" + drive.absolutePath() + "\n";
+        }
+        socket->write(response.toUtf8());
+    }
 }

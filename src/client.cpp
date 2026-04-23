@@ -17,19 +17,29 @@ void Client::connectToServer(const QString &host, int port) {
 
 void Client::onConnected() {
     qDebug() << "Connected to server!";
-    sendRequest("C:/Users");
+    
+    sendRequest("LIST:C:/Users");
 }
 
-void Client::sendRequest(const QString &path) {
-    QString message = "LIST:" + path;
-    socket->write(message.toUtf8());
+void Client::sendRequest(const QString &request) {
+    // QString message = "LIST:" + path;
+    socket->write(request.toUtf8());
     emit requestSent();
 }
 
 void Client::onReadyRead() {
     QByteArray data = socket->readAll();
     QString message = QString::fromUtf8(data);
+    qDebug() << "Raw response:" << message;
+
+    if (message.startsWith("OK:")) {
+        emit operationSuccess(message.mid(3));
+    } else if (message.startsWith("ERROR:")) {
+        emit operationError(message.mid(6));
+    } else {
+        QStringList entries = message.split("\n", Qt::SkipEmptyParts);
+        emit directoryListed(entries);
+    }
     
-    QStringList entries = message.split("\n", Qt::SkipEmptyParts);
-    emit directoryListed(entries);
+    
 }

@@ -22,4 +22,5 @@ signals:
 private:
     QString listDirectory(const QString &path);
     QSslServer *sslServer;
+    void handleRequest(QSslSocket *socket, const QString &message);
 };

@@ -14,6 +14,8 @@ private slots:
 private:
     QSslSocket *socket;
 signals:
-void directoryListed(const QStringList &entries);
-void requestSent();
+    void directoryListed(const QStringList &entries);
+    void requestSent();
+    void operationSuccess(const QString &message);  
+    void operationError(const QString &message);
 };

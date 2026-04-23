@@ -30,15 +30,33 @@ private slots:
     void onListItemDoubleClicked(const QModelIndex &index);
     void onBackClicked();
     void onContextMenu(const QPoint &pos);
+    void onOperationSuccess(const QString &message);
+    void onOperationError(const QString &message);
 
 
 private:
+    Client *client;
+
+
+    QLineEdit *pathBar;
+
+
+    QPushButton *homeButton;
+    QPushButton *refreshButton;
+    QPushButton *backButton;
+    // QPushButton *browseButton;
+
+
     QTreeView *treeView;
     QListView *listView;
     QFileSystemModel *treeModel;
     QStandardItemModel   *listModel;
-    QLineEdit *pathBar;
-    QPushButton *browseButton;
-    Client *client;
-    QPushButton *backButton;
+
+
+    QString pendingPath;
+    QString currentPath;
+    QString lastDownloadPath;
+
+
+    void ClientWindow::downloadFile(const QString &remotePath);
 };  
