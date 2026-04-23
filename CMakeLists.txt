@@ -14,9 +14,9 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 
 qt_add_executable(fileParser
     src/main.cpp
-    src/mainwindow.cpp
-    include/mainwindow.h 
-    ui/mainwindow.ui
+    src/clientwindow.cpp
+    include/clientwindow.h
+    ui/clientwindow.ui
     src/server.cpp
     include/server.h
     src/client.cpp

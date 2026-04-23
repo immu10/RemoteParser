@@ -1,4 +1,6 @@
-#include "mainwindow.h"
+#include "clientwindow.h"
+
+
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QSplitter>
@@ -8,8 +10,12 @@
 #include <QDebug>
 #include <QFileIconProvider>
 #include <QStandardItemModel>
+#include <QMenu>
 
-MainWindow::MainWindow(const QString &serverIP, int serverPort, QWidget *parent)
+
+
+
+ClientWindow::ClientWindow(const QString &serverIP, int serverPort, QWidget *parent)
     : QMainWindow(parent) {
     setWindowTitle("File Parser");
     setMinimumSize(900, 600);
@@ -35,6 +41,7 @@ MainWindow::MainWindow(const QString &serverIP, int serverPort, QWidget *parent)
     listView = new QListView(this);
     listView->setModel(listModel);
     listView->setEditTriggers(QAbstractItemView::NoEditTriggers); 
+    listView->setContextMenuPolicy(Qt::CustomContextMenu);
 
     // --- Path bar + browse button ---
     pathBar = new QLineEdit(this);
@@ -65,21 +72,22 @@ MainWindow::MainWindow(const QString &serverIP, int serverPort, QWidget *parent)
     setCentralWidget(central);
 
     // --- Connections ---
-    connect(treeView->selectionModel(), &QItemSelectionModel::currentChanged,this, &MainWindow::onDirectorySelected);
-    connect(browseButton, &QPushButton::clicked,this, &MainWindow::onBrowseClicked);
-    connect(listView, &QListView::doubleClicked, this, &MainWindow::onListItemDoubleClicked);
-    connect(backButton, &QPushButton::clicked, this, &MainWindow::onBackClicked);
+    connect(treeView->selectionModel(), &QItemSelectionModel::currentChanged,this, &ClientWindow::onDirectorySelected);
+    connect(browseButton, &QPushButton::clicked,this, &ClientWindow::onBrowseClicked);
+    connect(listView, &QListView::doubleClicked, this, &ClientWindow::onListItemDoubleClicked);
+    connect(backButton, &QPushButton::clicked, this, &ClientWindow::onBackClicked);
+    connect(listView, &QListView::customContextMenuRequested, this, &ClientWindow::onContextMenu);
 
 
 
 
     // --- Client ---
     client = new Client(this);
-    connect(client, &Client::directoryListed, this, &MainWindow::onDirectoryListed);
+    connect(client, &Client::directoryListed, this, &ClientWindow::onDirectoryListed);
     client->connectToServer(serverIP, serverPort);
 }
 
-void MainWindow::onDirectorySelected(const QModelIndex &index) {
+void ClientWindow::onDirectorySelected(const QModelIndex &index) {
     QString path = treeModel->filePath(index);
     qDebug() << "Directory selected:" << path;
     if (path.isEmpty()) return;
@@ -88,7 +96,7 @@ void MainWindow::onDirectorySelected(const QModelIndex &index) {
     client->sendRequest(path);  // ask server for contents
 }
 
-void MainWindow::onBrowseClicked() {
+void ClientWindow::onBrowseClicked() {
     QString dir = QFileDialog::getExistingDirectory(this, "Select Directory");
     if (!dir.isEmpty()) {
         pathBar->setText(dir);
@@ -98,7 +106,7 @@ void MainWindow::onBrowseClicked() {
     }
 }
 
-void MainWindow::onDirectoryListed(const QStringList &entries) {
+void ClientWindow::onDirectoryListed(const QStringList &entries) {
     listModel->clear();
     QFileIconProvider iconProvider;
     
@@ -116,11 +124,11 @@ void MainWindow::onDirectoryListed(const QStringList &entries) {
     statusBar()->showMessage("Ready");
 }
 
-void MainWindow::onRequestSent() {
+void ClientWindow::onRequestSent() {
     statusBar()->showMessage("Loading...");
 }
 
-void MainWindow::onListItemDoubleClicked(const QModelIndex &index) {
+void ClientWindow::onListItemDoubleClicked(const QModelIndex &index) {
     QString name = listModel->item(index.row())->text();
     QString currentPath = pathBar->text();
     QString newPath = currentPath + "/" + name;
@@ -129,7 +137,7 @@ void MainWindow::onListItemDoubleClicked(const QModelIndex &index) {
     pathBar->setText(newPath);
 }
 
-void MainWindow::onBackClicked() {
+void ClientWindow::onBackClicked() {
     QString currentPath = pathBar->text();
     QDir dir(currentPath);
     dir.cdUp();
@@ -139,13 +147,31 @@ void MainWindow::onBackClicked() {
     client->sendRequest(parentPath);
 }
 
+void ClientWindow::onContextMenu(const QPoint &pos) {
+    QModelIndex index = listView->indexAt(pos);
+    if (!index.isValid()) return;  // right clicked on empty space
+    
+    QString name = listModel->item(index.row())->text();
+    QString fullPath = pathBar->text() + "/" + name;
+
+    QMenu contextMenu(this);
+    QAction *deleteAction = contextMenu.addAction("Delete");
+    QAction *renameAction = contextMenu.addAction("Rename");
+    QAction *newFolderAction = contextMenu.addAction("New Folder");
+    
+    QAction *selected = contextMenu.exec(listView->mapToGlobal(pos));
+    
+    if (selected == deleteAction) {
+        client->sendRequest("DELETE:" + fullPath);
+    } else if (selected == renameAction) {
+        // coming next
+    } else if (selected == newFolderAction) {
+        // coming next
+    }
+}
 
 
 
 
-
-
-
-
-MainWindow::~MainWindow() {}
+ClientWindow::~ClientWindow() {}
 

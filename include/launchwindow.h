@@ -5,7 +5,7 @@
 
 
 
-class MainWindow;
+class ClientWindow;
 class Server;
 
 class LaunchWindow : public QWidget {

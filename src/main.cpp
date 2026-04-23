@@ -1,7 +1,7 @@
 #include <iostream>
 #include <filesystem>
 #include <QApplication>
-#include "mainwindow.h"
+#include "clientwindow.h"
 #include "server.h"
 #include "client.h"
 #include "launchwindow.h"

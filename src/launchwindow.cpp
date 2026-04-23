@@ -2,7 +2,7 @@
 #include <QVBoxLayout>
 #include <QDebug>
 
-#include "mainwindow.h"
+#include "clientwindow.h"
 #include "server.h"
 #include <serverwindow.h>
 
@@ -36,7 +36,7 @@ void LaunchWindow::onServerClicked() {
 }
 void LaunchWindow::onClientClicked() {
     qDebug() << "Connecting to" << serverIP << ":" << serverPort;
-    MainWindow *w = new MainWindow(serverIP, serverPort);
+    ClientWindow *w = new ClientWindow(serverIP, serverPort);
     w->show();
     this->close();
 }

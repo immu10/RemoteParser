@@ -15,12 +15,12 @@
 // #include "server.h"
 
 
-class MainWindow : public QMainWindow {
+class ClientWindow : public QMainWindow {
     Q_OBJECT
 
 public:
-    MainWindow(const QString &serverIP, int serverPort, QWidget *parent = nullptr);
-    ~MainWindow();
+    ClientWindow(const QString &serverIP, int serverPort, QWidget *parent = nullptr);
+    ~ClientWindow();
 
 private slots:
     void onDirectorySelected(const QModelIndex &index);
@@ -29,6 +29,8 @@ private slots:
     void onDirectoryListed(const QStringList &entries);
     void onListItemDoubleClicked(const QModelIndex &index);
     void onBackClicked();
+    void onContextMenu(const QPoint &pos);
+
 
 private:
     QTreeView *treeView;

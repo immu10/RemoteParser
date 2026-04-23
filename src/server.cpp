@@ -96,6 +96,14 @@ void Server::onNewConnection() {
             socket->write(response.toUtf8());
             emit activityLogged("Sent: " + path);
         }
+        if (message.startsWith("DELETE:")) {
+            QString path = message.mid(7);
+            QDir dir;
+            bool success = dir.remove(path);  // for files
+            if (!success) success = dir.rmdir(path);  // for empty dirs
+            socket->write(success ? "OK:Deleted" : "ERROR:Delete failed");
+        }
+        
     });
 }
 
