@@ -1,8 +1,8 @@
 #pragma once
 
 #include <QObject>
-#include <QTcpServer>
-#include <QTcpSocket>
+#include <QSslSocket>
+#include <QSslServer>
 #include <QDir>
 
 class Server : public QObject {
@@ -21,5 +21,5 @@ signals:
 
 private:
     QString listDirectory(const QString &path);
-    QTcpServer *tcpServer;
+    QSslServer *sslServer;
 };

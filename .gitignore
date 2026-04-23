@@ -54,3 +54,8 @@ vcpkg_installed/
 *.tmp
 *.temp
 *.log
+
+
+#openSSL certificates
+certs/*
+

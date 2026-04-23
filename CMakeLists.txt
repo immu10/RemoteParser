@@ -37,3 +37,14 @@ target_include_directories(fileParser PRIVATE include src)
 set_target_properties(fileParser PROPERTIES
     AUTOUIC_SEARCH_PATHS "${CMAKE_SOURCE_DIR}/ui"
 )
+
+add_custom_command(TARGET fileParser POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "C:/Program Files/OpenSSL-Win64/bin/libssl-4-x64.dll"
+        "C:/Program Files/OpenSSL-Win64/bin/libcrypto-4-x64.dll"
+        $<TARGET_FILE_DIR:fileParser>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/certs/server.crt"
+        "${CMAKE_SOURCE_DIR}/certs/server.key"
+        $<TARGET_FILE_DIR:fileParser>
+)

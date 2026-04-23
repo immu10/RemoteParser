@@ -1,6 +1,6 @@
 #pragma once
 #include <QObject>
-#include <QTcpSocket>
+#include <QsslSocket>
 
 class Client : public QObject {
     Q_OBJECT
@@ -12,7 +12,7 @@ private slots:
     void onConnected();
     void onReadyRead();
 private:
-    QTcpSocket *socket;
+    QSslSocket *socket;
 signals:
 void directoryListed(const QStringList &entries);
 void requestSent();

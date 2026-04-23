@@ -1,30 +1,89 @@
 #include "server.h"
-#include <QDebug>
-#include <QDir>
-#include <QFileInfo>
+
+
+#include <QSslServer>
+#include <QSslSocket>
+#include <QSslCertificate>
+#include <QSslKey>
+#include <QFile>
+#include <QCoreApplication>
 
 
 
-Server::Server(QObject *parent) {
-    tcpServer = new QTcpServer(this);
-    connect(tcpServer, &QTcpServer::newConnection, this, &Server::onNewConnection);
+
+
+
+Server::Server(QObject *parent): QObject(parent) {
+    sslServer = new QSslServer(this);
+    connect(sslServer, &QSslServer::pendingConnectionAvailable, this, &Server::onNewConnection);
     
 }
-void Server::startListening(int port){
-        if (tcpServer->listen(QHostAddress::Any,port)){
-            qDebug() << "Server is listening on port " << port;
-        } else {
-            qDebug() << "Failed to start server: " << tcpServer->errorString();
-        }
-    }   
+
+void Server::startListening(int port) {
+    QSslConfiguration sslConfig;
+    QString basePath = QCoreApplication::applicationDirPath();
+
+
+    QFile certFile(basePath + "/server.crt");
+    if (!certFile.open(QIODevice::ReadOnly)) {
+        qDebug() << "Failed to open cert file:" << certFile.fileName();
+        return;
+    }
+
+    // certFile.open(QIODevice::ReadOnly);  
+    QSslCertificate certificate(&certFile);
+    certFile.close();
+
+    
+    QFile keyFile(basePath + "/server.key");
+    if (!keyFile.open(QIODevice::ReadOnly)) {
+        qDebug() << "Failed to open key file:" << keyFile.fileName();
+        return;
+    }
+
+    // keyFile.open(QIODevice::ReadOnly);
+    QSslKey privateKey(&keyFile, QSsl::Rsa);
+    keyFile.close();
+    
+    sslConfig.setLocalCertificate(certificate);
+    sslConfig.setPrivateKey(privateKey);
+    
+    sslServer->setSslConfiguration(sslConfig);
+    
+    if (sslServer->listen(QHostAddress::Any, port)) {
+        qDebug() << "Server is listening on port" << port;
+    } else {
+        qDebug() << "Failed to start server";
+    }
+}
 
 
 void Server::onNewConnection() {
-    QTcpSocket *socket = tcpServer->nextPendingConnection();
+    // QSslSocket *socket = qobject_cast<QSslSocket*>(sslServer->nextPendingConnection());
+
+    //testing
+    QTcpSocket *tcpSocket = sslServer->nextPendingConnection();
+    QSslSocket *socket = qobject_cast<QSslSocket*>(tcpSocket);
+    if (!socket) {
+        qDebug() << "Socket type:" << tcpSocket->metaObject()->className();
+        return;
+    }
+
+    if (!socket) {
+        qDebug() << "Failed to get socket";
+        return;
+    }
+    connect(socket, &QSslSocket::sslErrors, this, [socket](const QList<QSslError> &errors) {
+        qDebug() << "SSL errors on server:" << errors;
+        socket->ignoreSslErrors();
+    });
+
+
+
     emit clientConnected(socket->peerAddress().toString());
     qDebug() << "Client connected:" << socket->peerAddress().toString();
 
-    connect(socket, &QTcpSocket::readyRead, this, [this, socket]() {
+    connect(socket, &QSslSocket::readyRead, this, [this, socket]() {
         QByteArray data = socket->readAll();
         QString message = QString::fromUtf8(data);
         qDebug() << "Received:" << message;

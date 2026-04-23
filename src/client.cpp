@@ -2,12 +2,17 @@
 #include <QDebug>
 
 Client::Client(QObject *parent) : QObject(parent) {
-    socket = new QTcpSocket(this);
-    connect(socket, &QTcpSocket::connected, this, &Client::onConnected);
-    connect(socket, &QTcpSocket::readyRead, this, &Client::onReadyRead);
+    socket = new QSslSocket(this);
+    connect(socket, &QSslSocket::connected, this, &Client::onConnected);
+    connect(socket, &QSslSocket::readyRead, this, &Client::onReadyRead);
+    connect(socket, &QSslSocket::sslErrors, this, [this](const QList<QSslError> &errors) {
+    qDebug() << "SSL errors:" << errors;
+    socket->ignoreSslErrors();
+});
+
 }
 void Client::connectToServer(const QString &host, int port) {
-    socket->connectToHost(host, port);
+    socket->connectToHostEncrypted(host, port);
 }
 
 void Client::onConnected() {
