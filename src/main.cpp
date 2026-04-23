@@ -14,8 +14,8 @@ int main(int argc, char *argv[]) {
     
     QApplication app(argc, argv);
 
-    Server server;
-    server.startListening(8080);
+    // Server server;
+    // server.startListening(8080);
     // Client client;
     // client.connectToServer("127.0.0.1", 8080);
     LaunchWindow launch;

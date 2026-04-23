@@ -81,6 +81,7 @@ MainWindow::MainWindow(const QString &serverIP, int serverPort, QWidget *parent)
 
 void MainWindow::onDirectorySelected(const QModelIndex &index) {
     QString path = treeModel->filePath(index);
+    qDebug() << "Directory selected:" << path;
     if (path.isEmpty()) return;
     pathBar->setText(path);
     statusBar()->showMessage("Loading...");

@@ -35,6 +35,7 @@ void LaunchWindow::onServerClicked() {
     this->close();
 }
 void LaunchWindow::onClientClicked() {
+    qDebug() << "Connecting to" << serverIP << ":" << serverPort;
     MainWindow *w = new MainWindow(serverIP, serverPort);
     w->show();
     this->close();
