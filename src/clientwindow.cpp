@@ -14,6 +14,7 @@
 #include <QInputDialog>
 #include <QShortcut>
 #include <QStandardPaths>
+#include <QToolButton>
 
 
 
@@ -97,7 +98,94 @@ ClientWindow::ClientWindow(const QString &serverIP, int serverPort, QWidget *par
     connect(client, &Client::operationError, this, &ClientWindow::onOperationError);
     connect(client, &Client::directoryListed, this, &ClientWindow::onDirectoryListed);
 
-    
+    connect(client, &Client::downloadComplete, this, &ClientWindow::onDownloadComplete);
+    connect(client, &Client::downloadError, this, &ClientWindow::onDownloadError);
+
+    progressBar = new QProgressBar(this);
+    progressBar->setRange(0, 100);
+    progressBar->setMaximumWidth(200);
+    progressBar->setTextVisible(true);
+    progressBar->setVisible(false);
+    statusBar()->addPermanentWidget(progressBar);
+
+    connect(client, &Client::downloadProgress, this, [this](qint64 received, qint64 total) {
+        if (progressBar->maximum() == 0) progressBar->setRange(0, 100);
+        if (!progressBar->isVisible()) progressBar->setVisible(true);
+        int pct = total > 0 ? int((received * 100) / total) : 0;
+        progressBar->setValue(pct);
+    });
+
+    connect(client, &Client::info, this, [this](const QString &msg) {
+        statusBar()->showMessage(msg);
+        progressBar->setRange(0, 0);
+        progressBar->setVisible(true);
+    });
+
+    connect(client, &Client::ready, this, [this]() {
+        statusBar()->showMessage("Connected");
+        client->sendRequest("LIST:" + currentPath);
+    });
+
+    transferDock = new QDockWidget("Transfers", this);
+    transferList = new QListWidget(transferDock);
+    transferDock->setWidget(transferList);
+    transferDock->setAllowedAreas(Qt::RightDockWidgetArea | Qt::BottomDockWidgetArea | Qt::LeftDockWidgetArea);
+    addDockWidget(Qt::RightDockWidgetArea, transferDock);
+
+    auto *transferToggleBtn = new QToolButton(this);
+    transferToggleBtn->setDefaultAction(transferDock->toggleViewAction());
+    transferToggleBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    statusBar()->addPermanentWidget(transferToggleBtn);
+
+    auto findItemBySavePath = [this](const QString &savePath) -> QListWidgetItem* {
+        for (int i = 0; i < transferList->count(); ++i) {
+            QListWidgetItem *li = transferList->item(i);
+            if (li->data(Qt::UserRole).toString() == savePath) return li;
+        }
+        return nullptr;
+    };
+
+    connect(client, &Client::transferQueued, this, [this](const QString &remotePath, const QString &savePath) {
+        QString name = QFileInfo(savePath).fileName();
+        auto *li = new QListWidgetItem(name + "  —  Queued");
+        li->setData(Qt::UserRole, savePath);
+        li->setToolTip(remotePath);
+        transferList->addItem(li);
+    });
+
+    connect(client, &Client::transferStarted, this, [this, findItemBySavePath](const QString &savePath) {
+        if (auto *li = findItemBySavePath(savePath)) {
+            li->setText(QFileInfo(savePath).fileName() + "  —  Active");
+            activeTransferItem = li;
+        }
+    });
+
+    connect(client, &Client::downloadProgress, this, [this](qint64 received, qint64 total) {
+        if (!activeTransferItem) return;
+        QString name = QFileInfo(activeTransferItem->data(Qt::UserRole).toString()).fileName();
+        int pct = total > 0 ? int((received * 100) / total) : 0;
+        activeTransferItem->setText(name + "  —  " + QString::number(pct) + "%");
+    });
+
+    connect(client, &Client::downloadComplete, this, [this, findItemBySavePath](const QString &savePath) {
+        if (auto *li = findItemBySavePath(savePath)) {
+            li->setText(QFileInfo(savePath).fileName() + "  —  Done");
+        }
+        if (activeTransferItem && activeTransferItem->data(Qt::UserRole).toString() == savePath) {
+            activeTransferItem = nullptr;
+        }
+    });
+
+    connect(client, &Client::transferFailed, this, [this, findItemBySavePath](const QString &savePath, const QString &reason) {
+        if (auto *li = findItemBySavePath(savePath)) {
+            li->setText(QFileInfo(savePath).fileName() + "  —  Failed: " + reason);
+        }
+        if (activeTransferItem && activeTransferItem->data(Qt::UserRole).toString() == savePath) {
+            activeTransferItem = nullptr;
+        }
+    });
+
+
     client->connectToServer(serverIP, serverPort);
     pendingPath = "C:/Users";
     currentPath = "C:/Users";
@@ -216,37 +304,55 @@ void ClientWindow::onContextMenu(const QPoint &pos) {
     bool hasSelection = index.isValid();
     
     QString name, fullPath;
-    if (hasSelection) {
-        name = listModel->item(index.row())->text();
-        fullPath = currentPath + "/" + name;
-    }
-
     QMenu contextMenu(this);
     QAction *deleteAction = contextMenu.addAction("Delete");
     QAction *renameAction = contextMenu.addAction("Rename");
     QAction *newFolderAction = contextMenu.addAction("New Folder");
+    QAction *downloadAction = contextMenu.addAction("Download");
 
+    if (hasSelection) {
+        QStandardItem *item = listModel->item(index.row());
+        name = item->text();
+        fullPath = currentPath + "/" + name;
+    } 
+    
+    
     deleteAction->setEnabled(hasSelection);
     renameAction->setEnabled(hasSelection);
+    downloadAction->setEnabled(true); 
+
 
     QAction *selected = contextMenu.exec(listView->mapToGlobal(pos));
+
     
     if (selected == deleteAction) {
         client->sendRequest("DELETE:" + fullPath);
+
     } else if (selected == renameAction) {
         bool ok;
-    QString newName = QInputDialog::getText(this, "Rename", "New name:", QLineEdit::Normal, name, &ok);
-    if (ok && !newName.isEmpty()) {
-        QString newPath = currentPath + "/" + newName;
-        client->sendRequest("RENAME:" + fullPath + "|" + newPath);
-    }
-} else if (selected == newFolderAction) {
+        QString newName = QInputDialog::getText(this, "Rename", "New name:", QLineEdit::Normal, name, &ok);
+        if (ok && !newName.isEmpty()) {
+            QString newPath = currentPath + "/" + newName;
+            client->sendRequest("RENAME:" + fullPath + "|" + newPath);
+        } 
+
+    }else if (selected == downloadAction) {
+        if (hasSelection) {
+            QStandardItem *item = listModel->item(index.row());
+            bool isDir = item->data(Qt::UserRole).toString() == "DIR";
+            downloadFile(fullPath, isDir);
+        } else {
+            downloadFile(currentPath, true);
+        }
+
+
+    }else if (selected == newFolderAction) {
     bool ok;
     QString folderName = QInputDialog::getText(this, "New Folder", "Folder name:", QLineEdit::Normal, "New Folder", &ok);
     if (ok && !folderName.isEmpty()) {
         client->sendRequest("MKDIR:" + currentPath + "/" + folderName);
+        }
     }
-}
 }
 
 
@@ -260,7 +366,31 @@ void ClientWindow::onOperationError(const QString &message) {
     statusBar()->showMessage("Error: " + message);
 }
 
+void ClientWindow::downloadFile(const QString &remotePath, bool isDirectory) {
+    QString filename = QFileInfo(remotePath).fileName();
+    if (isDirectory) {
+        if (filename.isEmpty()) filename = "download";
+        filename += ".zip";
+    }
+    QString savePath = QFileDialog::getSaveFileName(this, "Save File", lastDownloadPath + "/" + filename);
+    if (savePath.isEmpty()) return;
+    lastDownloadPath = QFileInfo(savePath).absolutePath();
+    client->queueDownload(remotePath, savePath);
+}
 
+void ClientWindow::onDownloadComplete(const QString &savePath) {
+    progressBar->setVisible(false);
+    progressBar->setRange(0, 100);
+    progressBar->setValue(0);
+    statusBar()->showMessage("Downloaded to: " + savePath);
+}
+
+void ClientWindow::onDownloadError(const QString &message) {
+    progressBar->setVisible(false);
+    progressBar->setRange(0, 100);
+    progressBar->setValue(0);
+    statusBar()->showMessage("Download failed: " + message);
+}
 
 ClientWindow::~ClientWindow() {}
 

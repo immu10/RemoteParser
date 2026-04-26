@@ -9,6 +9,9 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QStandardItemModel>
+#include <QProgressBar>
+#include <QDockWidget>
+#include <QListWidget>
 
 
 #include "client.h"
@@ -32,6 +35,8 @@ private slots:
     void onContextMenu(const QPoint &pos);
     void onOperationSuccess(const QString &message);
     void onOperationError(const QString &message);
+    void onDownloadComplete(const QString &savePath);
+    void onDownloadError(const QString &message);
 
 
 private:
@@ -51,6 +56,10 @@ private:
     QListView *listView;
     QFileSystemModel *treeModel;
     QStandardItemModel   *listModel;
+    QProgressBar *progressBar;
+    QDockWidget *transferDock;
+    QListWidget *transferList;
+    QListWidgetItem *activeTransferItem = nullptr;
 
 
     QString pendingPath;
@@ -58,5 +67,5 @@ private:
     QString lastDownloadPath;
 
 
-    void ClientWindow::downloadFile(const QString &remotePath);
+    void downloadFile(const QString &remotePath, bool isDirectory = false);
 };  
