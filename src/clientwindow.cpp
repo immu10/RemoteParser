@@ -18,7 +18,12 @@
 #include <QPainter>
 #include <QTimer>
 #include <QEvent>
+#include <QMessageBox>
 #include "transferrow.h"
+
+// Roles for remote tree nodes (distinct from the list pane's Qt::UserRole usage).
+static constexpr int PathRole = Qt::UserRole + 1;    // full remote path of a folder node
+static constexpr int LoadedRole = Qt::UserRole + 2;  // children already fetched?
 
 
 // Lightweight busy spinner that floats centered over a parent widget (the file
@@ -98,19 +103,14 @@ ClientWindow::ClientWindow(const QString &serverIP, int serverPort, QWidget *par
     lastDownloadPath = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
 
     // --- Models ---
-    treeModel = new QFileSystemModel(this);
-    treeModel->setRootPath("");
-    treeModel->setFilter(QDir::NoDotAndDotDot | QDir::Dirs);
+    treeModel = new QStandardItemModel(this);  // remote server tree, filled lazily
 
     listModel = new QStandardItemModel(this); // server data
 
     // --- Tree View (left) ---
     treeView = new QTreeView(this);
     treeView->setModel(treeModel);
-    treeView->setRootIndex(treeModel->index(""));
-    treeView->hideColumn(1); // size
-    treeView->hideColumn(2); // type
-    treeView->hideColumn(3); // date
+    treeView->setHeaderHidden(true);
     treeView->setMinimumWidth(250);
 
     // --- List View (right) ---
@@ -164,7 +164,8 @@ ClientWindow::ClientWindow(const QString &serverIP, int serverPort, QWidget *par
     connect(homeButton, &QPushButton::clicked, this, [this]() {pendingPath = ""; client->sendRequest("DRIVES");});
     connect(backButton, &QPushButton::clicked, this, &ClientWindow::onBackClicked);
 
-    connect(treeView->selectionModel(), &QItemSelectionModel::currentChanged,this, &ClientWindow::onDirectorySelected);
+    connect(treeView, &QTreeView::expanded, this, &ClientWindow::onTreeExpanded);
+    connect(treeView, &QTreeView::clicked, this, &ClientWindow::onTreeClicked);
     connect(listView, &QListView::doubleClicked, this, &ClientWindow::onListItemDoubleClicked);
     connect(listView, &QListView::customContextMenuRequested, this, &ClientWindow::onContextMenu);
 
@@ -173,8 +174,9 @@ ClientWindow::ClientWindow(const QString &serverIP, int serverPort, QWidget *par
     connect(client, &Client::directoryListed, this, &ClientWindow::onDirectoryListed);
 
     connect(client, &Client::listingRequested, this, [this]() { listSpinner->start(); });
-    connect(client, &Client::directoryListed, this, [this](const QStringList &) { listSpinner->stop(); });
+    connect(client, &Client::directoryListed, this, [this](const QString &, const QStringList &) { listSpinner->stop(); });
     connect(client, &Client::operationError, this, [this](const QString &) { listSpinner->stop(); });
+    connect(client, &Client::connectionLost, this, &ClientWindow::onConnectionLost);
 
     connect(client, &Client::downloadComplete, this, &ClientWindow::onDownloadComplete);
     connect(client, &Client::downloadError, this, &ClientWindow::onDownloadError);
@@ -201,7 +203,10 @@ ClientWindow::ClientWindow(const QString &serverIP, int serverPort, QWidget *par
 
     connect(client, &Client::ready, this, [this]() {
         statusBar()->showMessage("Connected");
-        client->sendRequest("LIST:" + currentPath);
+        treeModel->clear();          // fresh tree on (re)connect
+        currentPath = "";
+        pendingPath = "";            // drives listing answers path "" -> updates root + pane
+        client->sendRequest("DRIVES");
     });
 
     transferDock = new QDockWidget("Transfers", this);
@@ -340,33 +345,80 @@ ClientWindow::ClientWindow(const QString &serverIP, int serverPort, QWidget *par
 
 }
 
-void ClientWindow::onDirectorySelected(const QModelIndex &index) {
-    QString path = treeModel->filePath(index);
-    qDebug() << "Directory selected:" << path;
-    if (path.isEmpty()) return;
-    pendingPath = path;
-    statusBar()->showMessage("Loading...");
-    client->sendRequest("LIST:" + path);  // ask server for contents
+void ClientWindow::onTreeExpanded(const QModelIndex &index) {
+    QStandardItem *item = treeModel->itemFromIndex(index);
+    if (!item || item->data(LoadedRole).toBool()) return;   // already fetched
+    QString path = item->data(PathRole).toString();
+    client->sendRequest("LIST:" + path);   // load children; pendingPath untouched (pane stays put)
 }
 
-void ClientWindow::onBrowseClicked() {
-    QString dir = QFileDialog::getExistingDirectory(this, "Select Directory");
-    if (!dir.isEmpty()) {
-        pendingPath = dir;
-        treeView->setRootIndex(treeModel->index(dir));
-        statusBar()->showMessage("Loading...");
-        client->sendRequest("LIST:" + dir);  // ← ask server
+void ClientWindow::onTreeClicked(const QModelIndex &index) {
+    QStandardItem *item = treeModel->itemFromIndex(index);
+    if (!item) return;
+    QString path = item->data(PathRole).toString();
+    if (path.isEmpty()) return;
+    pendingPath = path;   // navigate the right pane to this folder too
+    statusBar()->showMessage("Loading...");
+    client->sendRequest("LIST:" + path);
+}
+
+QStandardItem *ClientWindow::findTreeNode(const QString &path) {
+    if (path.isEmpty()) return treeModel->invisibleRootItem();
+    QList<QStandardItem*> stack;
+    QStandardItem *root = treeModel->invisibleRootItem();
+    for (int i = 0; i < root->rowCount(); ++i) stack << root->child(i);
+    while (!stack.isEmpty()) {
+        QStandardItem *it = stack.takeLast();
+        if (!it) continue;
+        if (it->data(PathRole).toString() == path) return it;
+        for (int i = 0; i < it->rowCount(); ++i) stack << it->child(i);
+    }
+    return nullptr;
+}
+
+void ClientWindow::updateTreeNode(const QString &path, const QStringList &entries) {
+    QStandardItem *node = findTreeNode(path);
+    if (!node) return;   // listing for a folder not represented in the tree
+
+    const bool isRoot = (node == treeModel->invisibleRootItem());
+    // Populate only the first time, so navigating/refreshing doesn't collapse the tree.
+    if (isRoot) {
+        if (node->rowCount() > 0) return;
+    } else {
+        if (node->data(LoadedRole).toBool()) return;
+        node->setData(true, LoadedRole);
+    }
+
+    node->removeRows(0, node->rowCount());   // clear the lazy placeholder
+    QFileIconProvider iconProvider;
+    for (const QString &entry : entries) {
+        if (!entry.startsWith("DIR:")) continue;   // tree shows folders only
+        QString name = entry.mid(4);
+        QString childPath = isRoot ? name : QDir::cleanPath(path + "/" + name);
+
+        auto *child = new QStandardItem(iconProvider.icon(QFileIconProvider::Folder), name);
+        child->setEditable(false);
+        child->setData(childPath, PathRole);
+        child->setData(false, LoadedRole);
+        child->appendRow(new QStandardItem());   // placeholder -> shows expand arrow
+        node->appendRow(child);
     }
 }
 
-void ClientWindow::onDirectoryListed(const QStringList &entries) {
-    currentPath = pendingPath;
+void ClientWindow::onDirectoryListed(const QString &path, const QStringList &entries) {
+    // Keep the remote tree in sync for whichever node this listing belongs to.
+    updateTreeNode(path, entries);
+
+    // Only refresh the right-hand list if this is the folder the pane asked for.
+    if (path != pendingPath) return;
+
+    currentPath = path;
     pathBar->setText(currentPath);
     backButton->setEnabled(!currentPath.isEmpty());
     listModel->clear();
     QFileIconProvider iconProvider;
-    
-    
+
+
     for (const QString &entry : entries) {
         QStandardItem *item = new QStandardItem();
         if (entry.startsWith("DIR:")) {
@@ -385,6 +437,15 @@ void ClientWindow::onDirectoryListed(const QStringList &entries) {
 
 void ClientWindow::onRequestSent() {
     statusBar()->showMessage("Loading...");
+}
+
+void ClientWindow::onConnectionLost(const QString &reason) {
+    listSpinner->stop();
+    statusBar()->showMessage("Disconnected — " + reason);
+    QMessageBox::warning(this, "Connection lost",
+        "Lost the connection to the server.\n\n" + reason +
+        "\n\nThe server may have closed or the network dropped. "
+        "Re-open File Parser to reconnect.");
 }
 
 void ClientWindow::onListItemDoubleClicked(const QModelIndex &index) {

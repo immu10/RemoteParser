@@ -216,7 +216,7 @@ QString Session::listDirectory(const QString &path) {
         return "ERROR:Directory not found";
     }
     QStringList entries = dir.entryList(QDir::NoDotAndDotDot | QDir::Files | QDir::Dirs);
-    QString response = "LIST:BEGIN\n";
+    QString response = "LIST:BEGIN:" + path + "\n";
     for (const QString &entry : entries) {
         QFileInfo info(dir.absoluteFilePath(entry));
         if (info.isDir()) {
@@ -258,7 +258,7 @@ void Session::handleCommand(const QString &message) {
     }
     else if (message == "DRIVES") {
         QFileInfoList drives = QDir::drives();
-        QString response = "LIST:BEGIN\n";
+        QString response = "LIST:BEGIN:\n";
         for (const QFileInfo &drive : drives) {
             response += "DIR:" + drive.absolutePath() + "\n";
         }

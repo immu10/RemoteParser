@@ -49,6 +49,7 @@ private:
     void processDataChunk(QByteArray &data);
     void writeMoreUploadBytes();
     void finalizeDownload(bool ok, const QString &reason);
+    void handleDisconnect(const QString &reason);
 
     QSslSocket *controlSocket;
     QSslSocket *dataSocket;
@@ -61,6 +62,7 @@ private:
     QByteArray controlBuffer;
     QStringList listingEntries;
     bool collectingListing = false;
+    QString currentListingPath;
 
     // Downloads
     QQueue<DownloadItem> pendingDownloads;
@@ -83,9 +85,10 @@ private:
 
 signals:
     void ready();
-    void directoryListed(const QStringList &entries);
+    void directoryListed(const QString &path, const QStringList &entries);
     void requestSent();
     void listingRequested();
+    void connectionLost(const QString &reason);
     void operationSuccess(const QString &message);
     void operationError(const QString &message);
     void downloadComplete(const QString &savePath);

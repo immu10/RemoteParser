@@ -28,6 +28,16 @@ Client::Client(QObject *parent) : QObject(parent) {
     connect(dataSocket, &QSslSocket::encrypted, this, &Client::onDataEncrypted);
     connect(dataSocket, &QSslSocket::readyRead, this, &Client::onDataReadyRead);
     connect(dataSocket, &QSslSocket::bytesWritten, this, &Client::onDataBytesWritten);
+
+    connect(controlSocket, &QSslSocket::disconnected, this, [this]() {
+        handleDisconnect("The connection was closed.");
+    });
+    connect(controlSocket, &QAbstractSocket::errorOccurred, this, [this](QAbstractSocket::SocketError) {
+        handleDisconnect(controlSocket->errorString());
+    });
+    connect(dataSocket, &QSslSocket::disconnected, this, [this]() {
+        handleDisconnect("The connection was closed.");
+    });
 }
 
 void Client::connectToServer(const QString &h, int p) {
@@ -35,6 +45,12 @@ void Client::connectToServer(const QString &h, int p) {
     port = p;
     state = ConnectingControl;
     controlSocket->connectToHostEncrypted(host, port);
+}
+
+void Client::handleDisconnect(const QString &reason) {
+    if (state == Disconnected) return;   // report the loss only once
+    state = Disconnected;
+    emit connectionLost(reason);
 }
 
 void Client::onControlEncrypted() {
@@ -219,14 +235,15 @@ void Client::handleControlMessage(const QByteArray &msgBytes) {
         }
         return;
     }
-    if (message == "LIST:BEGIN") {
+    if (message.startsWith("LIST:BEGIN:")) {
         collectingListing = true;
+        currentListingPath = message.mid(11);   // path this listing answers ("" = drives)
         listingEntries.clear();
         return;
     }
     if (message == "LIST:END") {
         collectingListing = false;
-        emit directoryListed(listingEntries);
+        emit directoryListed(currentListingPath, listingEntries);
         listingEntries.clear();
         return;
     }

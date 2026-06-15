@@ -27,10 +27,10 @@ public:
     ~ClientWindow();
 
 private slots:
-    void onDirectorySelected(const QModelIndex &index);
-    void onBrowseClicked();
+    void onTreeExpanded(const QModelIndex &index);
+    void onTreeClicked(const QModelIndex &index);
     void onRequestSent();
-    void onDirectoryListed(const QStringList &entries);
+    void onDirectoryListed(const QString &path, const QStringList &entries);
     void onListItemDoubleClicked(const QModelIndex &index);
     void onBackClicked();
     void onContextMenu(const QPoint &pos);
@@ -38,6 +38,7 @@ private slots:
     void onOperationError(const QString &message);
     void onDownloadComplete(const QString &savePath);
     void onDownloadError(const QString &message);
+    void onConnectionLost(const QString &reason);
 
 
 private:
@@ -56,7 +57,7 @@ private:
     QTreeView *treeView;
     QListView *listView;
     SpinnerOverlay *listSpinner = nullptr;
-    QFileSystemModel *treeModel;
+    QStandardItemModel   *treeModel;   // remote server tree (lazy-loaded)
     QStandardItemModel   *listModel;
     QProgressBar *progressBar;
     QDockWidget *transferDock;
@@ -70,4 +71,8 @@ private:
 
 
     void downloadFile(const QString &remotePath, bool isDirectory = false);
-};  
+
+    // Remote tree helpers
+    QStandardItem *findTreeNode(const QString &path);
+    void updateTreeNode(const QString &path, const QStringList &entries);
+};
