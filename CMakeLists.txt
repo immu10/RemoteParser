@@ -23,6 +23,8 @@ qt_add_executable(fileParser
     include/launchwindow.h
     src/serverwindow.cpp
     include/serverwindow.h
+    src/transferrow.cpp
+    include/transferrow.h
 
 )
 

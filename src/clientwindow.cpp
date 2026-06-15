@@ -15,7 +15,79 @@
 #include <QShortcut>
 #include <QStandardPaths>
 #include <QToolButton>
+#include <QPainter>
+#include <QTimer>
+#include <QEvent>
+#include "transferrow.h"
 
+
+// Lightweight busy spinner that floats centered over a parent widget (the file
+// list). Appears only after a short delay so quick listings don't flicker.
+class SpinnerOverlay : public QWidget {
+public:
+    explicit SpinnerOverlay(QWidget *parent) : QWidget(parent) {
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        hide();
+
+        anim.setInterval(40);
+        connect(&anim, &QTimer::timeout, this, [this]() {
+            angle = (angle + 30) % 360;
+            update();
+        });
+
+        showDelay.setSingleShot(true);
+        showDelay.setInterval(250);
+        connect(&showDelay, &QTimer::timeout, this, [this]() {
+            if (parentWidget()) setGeometry(parentWidget()->rect());
+            raise();
+            show();
+            anim.start();
+        });
+
+        if (parent) parent->installEventFilter(this);
+    }
+
+    void start() {
+        if (isVisible() || showDelay.isActive()) return;
+        showDelay.start();
+    }
+
+    void stop() {
+        showDelay.stop();
+        anim.stop();
+        hide();
+    }
+
+protected:
+    bool eventFilter(QObject *obj, QEvent *ev) override {
+        if (obj == parentWidget() && ev->type() == QEvent::Resize && isVisible())
+            setGeometry(parentWidget()->rect());
+        return QWidget::eventFilter(obj, ev);
+    }
+
+    void paintEvent(QPaintEvent *) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.fillRect(rect(), QColor(255, 255, 255, 130));
+
+        const qreal dim = 44;
+        const int blades = 12;
+        p.translate(width() / 2.0, height() / 2.0);
+        p.rotate(angle);
+        p.setPen(Qt::NoPen);
+        for (int i = 0; i < blades; ++i) {
+            int alpha = 40 + 215 * i / (blades - 1);
+            p.setBrush(QColor(110, 110, 110, alpha));
+            p.drawRoundedRect(QRectF(dim / 2.0 - 7, -2.5, 7, 5), 2.5, 2.5);
+            p.rotate(360.0 / blades);
+        }
+    }
+
+private:
+    QTimer anim;
+    QTimer showDelay;
+    int angle = 0;
+};
 
 
 ClientWindow::ClientWindow(const QString &serverIP, int serverPort, QWidget *parent)
@@ -44,8 +116,10 @@ ClientWindow::ClientWindow(const QString &serverIP, int serverPort, QWidget *par
     // --- List View (right) ---
     listView = new QListView(this);
     listView->setModel(listModel);
-    listView->setEditTriggers(QAbstractItemView::NoEditTriggers); 
+    listView->setEditTriggers(QAbstractItemView::NoEditTriggers);
     listView->setContextMenuPolicy(Qt::CustomContextMenu);
+
+    listSpinner = new SpinnerOverlay(listView);
 
     // --- Path bar +  buttons ---
     pathBar = new QLineEdit(this);
@@ -98,6 +172,10 @@ ClientWindow::ClientWindow(const QString &serverIP, int serverPort, QWidget *par
     connect(client, &Client::operationError, this, &ClientWindow::onOperationError);
     connect(client, &Client::directoryListed, this, &ClientWindow::onDirectoryListed);
 
+    connect(client, &Client::listingRequested, this, [this]() { listSpinner->start(); });
+    connect(client, &Client::directoryListed, this, [this](const QStringList &) { listSpinner->stop(); });
+    connect(client, &Client::operationError, this, [this](const QString &) { listSpinner->stop(); });
+
     connect(client, &Client::downloadComplete, this, &ClientWindow::onDownloadComplete);
     connect(client, &Client::downloadError, this, &ClientWindow::onDownloadError);
 
@@ -137,51 +215,89 @@ ClientWindow::ClientWindow(const QString &serverIP, int serverPort, QWidget *par
     transferToggleBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
     statusBar()->addPermanentWidget(transferToggleBtn);
 
-    auto findItemBySavePath = [this](const QString &savePath) -> QListWidgetItem* {
+    auto addTransferRow = [this](TransferRow::Direction dir, const QString &keyPath, const QString &otherPath) {
+        auto *row = new TransferRow(dir, keyPath, otherPath);
+        auto *li = new QListWidgetItem();
+        li->setSizeHint(row->sizeHint());
+        transferList->addItem(li);
+        transferList->setItemWidget(li, row);
+        connect(row, &TransferRow::cancelRequested, this, [this](TransferRow::Direction d, const QString &p) {
+            if (d == TransferRow::Download) client->cancelDownload(p);
+            else client->cancelUpload(p);
+        });
+    };
+
+    auto findRow = [this](TransferRow::Direction dir, const QString &keyPath) -> TransferRow* {
         for (int i = 0; i < transferList->count(); ++i) {
             QListWidgetItem *li = transferList->item(i);
-            if (li->data(Qt::UserRole).toString() == savePath) return li;
+            auto *row = qobject_cast<TransferRow*>(transferList->itemWidget(li));
+            if (row && row->getDirection() == dir && row->getPath() == keyPath) return row;
         }
         return nullptr;
     };
 
-    connect(client, &Client::transferQueued, this, [this](const QString &remotePath, const QString &savePath) {
-        QString name = QFileInfo(savePath).fileName();
-        auto *li = new QListWidgetItem(name + "  —  Queued");
-        li->setData(Qt::UserRole, savePath);
-        li->setToolTip(remotePath);
-        transferList->addItem(li);
+    auto findRowBySavePath = [this](const QString &savePath) -> TransferRow* {
+        for (int i = 0; i < transferList->count(); ++i) {
+            QListWidgetItem *li = transferList->item(i);
+            auto *row = qobject_cast<TransferRow*>(transferList->itemWidget(li));
+            if (row && row->getDirection() == TransferRow::Download
+                && row->getOtherPath() == savePath) return row;
+        }
+        return nullptr;
+    };
+
+    connect(client, &Client::transferQueued, this, [addTransferRow](const QString &remotePath, const QString &savePath) {
+        addTransferRow(TransferRow::Download, remotePath, savePath);
     });
 
-    connect(client, &Client::transferStarted, this, [this, findItemBySavePath](const QString &savePath) {
-        if (auto *li = findItemBySavePath(savePath)) {
-            li->setText(QFileInfo(savePath).fileName() + "  —  Active");
-            activeTransferItem = li;
+    connect(client, &Client::transferStarted, this, [findRowBySavePath](const QString &savePath) {
+        if (auto *row = findRowBySavePath(savePath)) row->setActive();
+    });
+
+    connect(client, &Client::downloadProgress, this, [findRowBySavePath, this](qint64 received, qint64 total) {
+        // current download row matches currentDownload's savePath; we don't have it directly here,
+        // walk and find the one that's Active among Download rows
+        for (int i = 0; i < transferList->count(); ++i) {
+            QListWidgetItem *li = transferList->item(i);
+            auto *row = qobject_cast<TransferRow*>(transferList->itemWidget(li));
+            if (row && row->getDirection() == TransferRow::Download) {
+                row->setProgress(received, total);
+                break;
+            }
         }
     });
 
-    connect(client, &Client::downloadProgress, this, [this](qint64 received, qint64 total) {
-        if (!activeTransferItem) return;
-        QString name = QFileInfo(activeTransferItem->data(Qt::UserRole).toString()).fileName();
-        int pct = total > 0 ? int((received * 100) / total) : 0;
-        activeTransferItem->setText(name + "  —  " + QString::number(pct) + "%");
+    connect(client, &Client::downloadComplete, this, [findRowBySavePath](const QString &savePath) {
+        if (auto *row = findRowBySavePath(savePath)) row->setDone();
     });
 
-    connect(client, &Client::downloadComplete, this, [this, findItemBySavePath](const QString &savePath) {
-        if (auto *li = findItemBySavePath(savePath)) {
-            li->setText(QFileInfo(savePath).fileName() + "  —  Done");
-        }
-        if (activeTransferItem && activeTransferItem->data(Qt::UserRole).toString() == savePath) {
-            activeTransferItem = nullptr;
+    connect(client, &Client::transferFailed, this, [findRowBySavePath](const QString &savePath, const QString &reason) {
+        if (auto *row = findRowBySavePath(savePath)) {
+            if (reason == "Cancelled") row->setCancelled();
+            else row->setFailed(reason);
         }
     });
 
-    connect(client, &Client::transferFailed, this, [this, findItemBySavePath](const QString &savePath, const QString &reason) {
-        if (auto *li = findItemBySavePath(savePath)) {
-            li->setText(QFileInfo(savePath).fileName() + "  —  Failed: " + reason);
-        }
-        if (activeTransferItem && activeTransferItem->data(Qt::UserRole).toString() == savePath) {
-            activeTransferItem = nullptr;
+    connect(client, &Client::uploadQueued, this, [addTransferRow](const QString &localPath, const QString &destPath) {
+        addTransferRow(TransferRow::Upload, destPath, localPath);
+    });
+
+    connect(client, &Client::uploadStarted, this, [findRow](const QString &destPath) {
+        if (auto *row = findRow(TransferRow::Upload, destPath)) row->setActive();
+    });
+
+    connect(client, &Client::uploadProgress, this, [findRow](const QString &destPath, qint64 sent, qint64 total) {
+        if (auto *row = findRow(TransferRow::Upload, destPath)) row->setProgress(sent, total);
+    });
+
+    connect(client, &Client::uploadComplete, this, [findRow](const QString &destPath) {
+        if (auto *row = findRow(TransferRow::Upload, destPath)) row->setDone();
+    });
+
+    connect(client, &Client::uploadFailed, this, [findRow](const QString &destPath, const QString &reason) {
+        if (auto *row = findRow(TransferRow::Upload, destPath)) {
+            if (reason == "Cancelled") row->setCancelled();
+            else row->setFailed(reason);
         }
     });
 
@@ -309,6 +425,7 @@ void ClientWindow::onContextMenu(const QPoint &pos) {
     QAction *renameAction = contextMenu.addAction("Rename");
     QAction *newFolderAction = contextMenu.addAction("New Folder");
     QAction *downloadAction = contextMenu.addAction("Download");
+    QAction *uploadAction = contextMenu.addAction("Upload here...");
 
     if (hasSelection) {
         QStandardItem *item = listModel->item(index.row());
@@ -346,6 +463,14 @@ void ClientWindow::onContextMenu(const QPoint &pos) {
         }
 
 
+    }else if (selected == uploadAction) {
+        QString localPath = QFileDialog::getOpenFileName(this, "Pick file to upload");
+        if (localPath.isEmpty()) return;
+        QString destDir = currentPath;
+        QString destPath = destDir + "/" + QFileInfo(localPath).fileName();
+        if (!client->queueUpload(localPath, destPath)) {
+            statusBar()->showMessage("Cannot open local file");
+        }
     }else if (selected == newFolderAction) {
     bool ok;
     QString folderName = QInputDialog::getText(this, "New Folder", "Folder name:", QLineEdit::Normal, "New Folder", &ok);

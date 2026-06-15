@@ -17,6 +17,7 @@
 #include "client.h"
 // #include "server.h"
 
+class SpinnerOverlay;
 
 class ClientWindow : public QMainWindow {
     Q_OBJECT
@@ -54,6 +55,7 @@ private:
 
     QTreeView *treeView;
     QListView *listView;
+    SpinnerOverlay *listSpinner = nullptr;
     QFileSystemModel *treeModel;
     QStandardItemModel   *listModel;
     QProgressBar *progressBar;

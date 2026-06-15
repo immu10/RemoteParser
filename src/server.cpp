@@ -189,6 +189,7 @@ void Session::attachData(QSslSocket *d) {
     data = d;
     data->setParent(this);
     connect(data, &QSslSocket::disconnected, this, &Session::onSocketDisconnected);
+    connect(data, &QSslSocket::readyRead, this, &Session::onDataReadyRead);
 }
 
 void Session::onSocketDisconnected() {
@@ -216,7 +217,7 @@ QString Session::listDirectory(const QString &path) {
         return "ERROR:Directory not found";
     }
     QStringList entries = dir.entryList(QDir::NoDotAndDotDot | QDir::Files | QDir::Dirs);
-    QString response;
+    QString response = "LIST:BEGIN\n";
     for (const QString &entry : entries) {
         QFileInfo info(dir.absoluteFilePath(entry));
         if (info.isDir()) {
@@ -225,7 +226,7 @@ QString Session::listDirectory(const QString &path) {
             response += "FILE:" + entry + "\n";
         }
     }
-    if (response.isEmpty()) response = "\n";
+    response += "LIST:END\n";
     return response;
 }
 
@@ -258,10 +259,11 @@ void Session::handleCommand(const QString &message) {
     }
     else if (message == "DRIVES") {
         QFileInfoList drives = QDir::drives();
-        QString response;
+        QString response = "LIST:BEGIN\n";
         for (const QFileInfo &drive : drives) {
             response += "DIR:" + drive.absolutePath() + "\n";
         }
+        response += "LIST:END\n";
         control->write(response.toUtf8());
     }
     else if (message.startsWith("DOWNLOAD:")) {
@@ -271,6 +273,38 @@ void Session::handleCommand(const QString &message) {
             return;
         }
         enqueueDownload(path);
+    }
+    else if (message.startsWith("UPLOAD:")) {
+        QString rest = message.mid(7).trimmed();
+        QStringList parts = rest.split("|");
+        if (parts.size() < 3) {
+            control->write("ERROR:Bad UPLOAD command");
+            return;
+        }
+        PendingUpload up;
+        up.destPath = parts[0];
+        up.expectedSize = parts[1].mid(9).toLongLong();
+        up.expectedHash = parts[2].mid(7);
+        if (!data) {
+            control->write("ERROR:Data channel not ready");
+            return;
+        }
+        enqueueUpload(up);
+    }
+    else if (message.startsWith("CANCEL:DOWNLOAD:")) {
+        QString path = message.mid(16).trimmed();
+        cancelDownload(path);
+    }
+    else if (message.startsWith("CANCEL:UPLOAD:")) {
+        QString rest = message.mid(14).trimmed();
+        QStringList parts = rest.split("|");
+        if (parts.size() < 2) {
+            control->write("ERROR:Bad CANCEL UPLOAD");
+            return;
+        }
+        QString destPath = parts[0];
+        qint64 clientBytes = parts[1].toLongLong();
+        cancelUpload(destPath, clientBytes);
     }
 }
 
@@ -288,18 +322,21 @@ void Session::startNextDownload() {
     if (dying) return;
     if (downloadQueue.isEmpty()) {
         transferActive = false;
+        activeTransfer = nullptr;
+        currentRemotePath.clear();
         return;
     }
 
     QString path = downloadQueue.dequeue();
     QFileInfo info(path);
     if (!info.exists()) {
-        control->write("ERROR:File not found");
+        control->write(("ERROR:File not found:" + path).toUtf8());
         startNextDownload();
         return;
     }
 
     transferActive = true;
+    currentRemotePath = path;
 
     if (info.isDir()) {
         control->write("INFO:Preparing folder...\n");
@@ -355,9 +392,12 @@ void Session::startNextDownload() {
                 delete transfer;
                 QFile::remove(r.tempPath);
                 transferActive = false;
+                activeTransfer = nullptr;
+                currentRemotePath.clear();
                 startNextDownload();
                 return;
             }
+            activeTransfer = transfer;
             server->logActivity("Streaming folder: " + path);
         });
         watcher->setFuture(future);
@@ -370,10 +410,142 @@ void Session::startNextDownload() {
         control->write("ERROR:Cannot open file");
         delete transfer;
         transferActive = false;
+        activeTransfer = nullptr;
+        currentRemotePath.clear();
         startNextDownload();
         return;
     }
+    activeTransfer = transfer;
     server->logActivity("Streaming file: " + path);
+}
+
+void Session::cancelDownload(const QString &path) {
+    if (transferActive && currentRemotePath == path && activeTransfer) {
+        qint64 sent = activeTransfer->bytesSentSoFar();
+        control->write(("CANCELLED:DOWNLOAD:" + path + ":" + QString::number(sent) + "\n").toUtf8());
+        activeTransfer->abort();
+        return;
+    }
+    int idx = downloadQueue.indexOf(path);
+    if (idx >= 0) {
+        downloadQueue.removeAt(idx);
+        control->write(("CANCELLED:DOWNLOAD:" + path + ":0\n").toUtf8());
+        return;
+    }
+    control->write(("ERROR:Cancel target not found:" + path).toUtf8());
+}
+
+void Session::enqueueUpload(const PendingUpload &up) {
+    uploadQueue.enqueue(up);
+    if (uploadActive) {
+        int position = uploadQueue.size();
+        control->write(("INFO:Upload queued (#" + QString::number(position) + " in line)\n").toUtf8());
+    } else {
+        startNextUpload();
+    }
+}
+
+void Session::startNextUpload() {
+    if (dying) return;
+    if (uploadQueue.isEmpty()) {
+        uploadActive = false;
+        return;
+    }
+    currentUpload = uploadQueue.dequeue();
+    if (uploadFile.isOpen()) uploadFile.close();
+    uploadFile.setFileName(currentUpload.destPath);
+    if (!uploadFile.open(QIODevice::WriteOnly)) {
+        control->write(("ERROR:Cannot open dest:" + currentUpload.destPath).toUtf8());
+        startNextUpload();
+        return;
+    }
+    uploadHasher.reset();
+    uploadBytesReceived = 0;
+    uploadDraining = false;
+    uploadDrainTarget = 0;
+    uploadActive = true;
+    control->write(("UPLOADREADY:" + currentUpload.destPath + "\n").toUtf8());
+    server->logActivity("Receiving upload: " + currentUpload.destPath);
+}
+
+void Session::cancelUpload(const QString &destPath, qint64 clientBytesSent) {
+    if (uploadActive && currentUpload.destPath == destPath) {
+        uploadDraining = true;
+        uploadDrainTarget = clientBytesSent;
+        if (uploadBytesReceived >= uploadDrainTarget) {
+            finishCurrentUpload(false, "Cancelled");
+        }
+        return;
+    }
+    for (int i = 0; i < uploadQueue.size(); ++i) {
+        if (uploadQueue.at(i).destPath == destPath) {
+            uploadQueue.removeAt(i);
+            control->write(("CANCELLED:UPLOAD:" + destPath + "\n").toUtf8());
+            return;
+        }
+    }
+    control->write(("ERROR:Cancel target not found:" + destPath).toUtf8());
+}
+
+void Session::finishCurrentUpload(bool ok, const QString &reason) {
+    QString destPath = currentUpload.destPath;
+    uploadFile.close();
+    if (!ok) QFile::remove(destPath);
+    uploadActive = false;
+    uploadDraining = false;
+    uploadBytesReceived = 0;
+    uploadDrainTarget = 0;
+    if (ok) {
+        control->write(("OK:Uploaded:" + destPath).toUtf8());
+        server->logActivity("Upload complete: " + destPath);
+    } else {
+        control->write(("CANCELLED:UPLOAD:" + destPath + "\n").toUtf8());
+        server->logActivity("Upload cancelled/failed: " + destPath + " (" + reason + ")");
+    }
+    startNextUpload();
+}
+
+void Session::onDataReadyRead() {
+    if (dying) return;
+    QByteArray data = this->data->readAll();
+    while (!data.isEmpty()) {
+        if (!uploadActive) return;
+
+        qint64 effectiveTotal = uploadDraining ? uploadDrainTarget : currentUpload.expectedSize;
+        qint64 remaining = effectiveTotal - uploadBytesReceived;
+        if (remaining <= 0) {
+            if (uploadDraining) {
+                finishCurrentUpload(false, "Cancelled");
+            } else {
+                QString actual = uploadHasher.result().toHex();
+                if (actual == currentUpload.expectedHash) {
+                    finishCurrentUpload(true, "");
+                } else {
+                    finishCurrentUpload(false, "Hash mismatch");
+                }
+            }
+            continue;
+        }
+        QByteArray chunk = data.left(remaining);
+        data = data.mid(chunk.size());
+        if (!uploadDraining) {
+            uploadFile.write(chunk);
+            uploadHasher.addData(chunk);
+        }
+        uploadBytesReceived += chunk.size();
+        if (uploadBytesReceived >= effectiveTotal) {
+            if (uploadDraining) {
+                finishCurrentUpload(false, "Cancelled");
+            } else {
+                QString actual = uploadHasher.result().toHex();
+                if (actual == currentUpload.expectedHash) {
+                    finishCurrentUpload(true, "");
+                } else {
+                    finishCurrentUpload(false, "Hash mismatch");
+                }
+            }
+        }
+    }
 }
 
 void Session::onTransferFinished() {
@@ -441,4 +613,8 @@ void FileTransfer::cleanup() {
     if (removeAfter) QFile::remove(sourcePath);
     emit finished();
     deleteLater();
+}
+
+void FileTransfer::abort() {
+    cleanup();
 }
