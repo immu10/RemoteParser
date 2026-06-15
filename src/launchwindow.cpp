@@ -94,12 +94,12 @@ void LaunchWindow::onServerClicked() {
     Server *server = new Server();
     server->startListening(port);
 
-    serverInfoLabel->setText(
-        QString("Listening on %1:%2\nEnter this on the other PC.")
+    const QString listenInfo =
+        QString("Listening on  %1  (port %2)\nEnter this address on the other PC to connect.")
             .arg(localAddresses())
-            .arg(port));
+            .arg(port);
 
-    ServerWindow *window = new ServerWindow(server);
+    ServerWindow *window = new ServerWindow(server, listenInfo);
     window->show();
 
     this->close();

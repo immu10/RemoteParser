@@ -2,12 +2,14 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
-ServerWindow::ServerWindow(Server *server, QWidget *parent) 
+ServerWindow::ServerWindow(Server *server, const QString &listenInfo, QWidget *parent)
     : QMainWindow(parent), server(server) {
     setWindowTitle("File Parser - Server");
     setMinimumSize(600, 400);
 
-    statusLabel = new QLabel("Listening on port 8080", this);
+    statusLabel = new QLabel(listenInfo, this);
+    statusLabel->setWordWrap(true);
+    statusLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     logView = new QTextEdit(this);
     logView->setReadOnly(true);
 
@@ -25,7 +27,7 @@ ServerWindow::ServerWindow(Server *server, QWidget *parent)
 }
 
 void ServerWindow::onClientConnected(const QString &address) {
-    statusLabel->setText("Client connected: " + address);
+    logView->append("Client connected: " + address);
 }
 void ServerWindow::onActivityLogged(const QString &message) {
     logView->append(message);

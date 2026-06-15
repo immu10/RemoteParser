@@ -9,7 +9,7 @@ class ServerWindow : public QMainWindow {
     Q_OBJECT
 
 public:
-    explicit ServerWindow(Server *server, QWidget *parent = nullptr);
+    explicit ServerWindow(Server *server, const QString &listenInfo, QWidget *parent = nullptr);
 
 private slots:
     void onClientConnected(const QString &address);

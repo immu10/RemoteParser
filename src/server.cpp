@@ -1,6 +1,4 @@
 #include "server.h"
-
-
 #include <QSslServer>
 #include <QSslSocket>
 #include <QSslCertificate>
@@ -15,6 +13,7 @@
 #include <QPointer>
 #include <QUuid>
 #include <private/qzipwriter_p.h>
+
 
 static constexpr qint64 SendChunkSize = 256 * 1024;
 static constexpr qint64 MaxQueuedBytes = 4 * 1024 * 1024;
