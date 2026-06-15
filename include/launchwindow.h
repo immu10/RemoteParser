@@ -2,6 +2,8 @@
 
 #include <QWidget>
 #include <QPushButton>
+#include <QLineEdit>
+#include <QLabel>
 
 
 
@@ -19,6 +21,13 @@ private slots:
     void onClientClicked();
 
 private:
+    QString localAddresses() const;
+
     QPushButton *serverButton;
     QPushButton *clientButton;
+
+    QLineEdit *serverPortEdit;
+    QLineEdit *hostEdit;
+    QLineEdit *clientPortEdit;
+    QLabel *serverInfoLabel;
 };
