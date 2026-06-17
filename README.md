@@ -2,6 +2,10 @@
 
 A secure, peer-to-peer file browsing and transfer application built with C++ and Qt 6.
 
+## Demo
+
+yt https://youtu.be/C4w6T1Z4hro
+
 ## Overview
 
 File Parser lets two devices connect over the network and browse, download, and
