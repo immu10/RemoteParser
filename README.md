@@ -66,7 +66,7 @@ and can be cancelled mid-flight, with live progress shown in the UI.
                   └─────────────────────────────────────┘
 ```
 
-### Source layout
+## Project Structure
 
 | Path | Contents |
 |------|----------|
