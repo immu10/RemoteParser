@@ -27,37 +27,6 @@ and can be cancelled mid-flight, with live progress shown in the UI.
 
 ## Architecture
 
-The application is organized around two roles and a dual-socket session model.
-
-### Roles & UI
-
-- **`LaunchWindow`** — the entry screen. Lets the user pick a role and enter the
-  port (server) or host/port (client). Also displays the machine's local
-  addresses to ease connection setup.
-- **`ServerWindow`** — server-side dashboard showing listen status, connected
-  clients, and a live activity log.
-- **`ClientWindow`** — the file browser. Presents the remote filesystem as a tree
-  and list view, a path bar with navigation, a context menu for download/upload
-  actions, and a transfer dock listing active and queued transfers.
-- **`TransferRow`** — a widget representing a single queued or active transfer
-  (download or upload) with status and a cancel button.
-
-### Connection model
-
-Each client/server session uses **two sockets**:
-
-- A **control channel** for commands and responses (directory listings, transfer
-  requests, status, errors).
-- A **data channel** for the raw file byte stream.
-
-On the server, `Server` accepts incoming TLS connections via `QSslServer` and
-creates a `Session` for each client. A `Session` owns both sockets, parses control
-commands, and drives transfers. Outgoing file streaming is handled by a dedicated
-`FileTransfer` object that writes file data over the socket in backpressure-aware
-chunks (`writeMore` / `bytesWritten`).
-
-### Flow chart
-
 ```
                           ┌───────────────────┐
                           │    LaunchWindow    │
