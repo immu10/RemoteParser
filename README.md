@@ -1,6 +1,6 @@
 # File Parser
 
-A secure, peer-to-peer file browsing and transfer application built with C++ and Qt 6.
+A secure, peer-to-peer file browsing and transfer application built with C++ and Qt 6. A setup installer is available in the dist dir.
 
 ## Demo
 
