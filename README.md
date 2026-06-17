@@ -125,4 +125,4 @@ This project is under active development. More features and documentation coming
 
 ## Tags
 
-`qt` `c++` `sslsocket`
+`Qt` `C++` `SSL Socket`
